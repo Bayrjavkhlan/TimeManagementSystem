@@ -1,0 +1,48 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+*.manifest
+*.spec
+
+# --- Virtual Environment ---
+venv/
+env/
+ENV/
+.venv/
+.pyenv/
+
+# --- Logs ---
+*.log
+*.txt
+
+# --- Face Data & Generated Files ---
+known_faces/
+time_logs.txt
+
+# --- IDE / Editor Files ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS Files ---
+.DS_Store
+Thumbs.db
+
+# --- Build / Packaging ---
+build/
+dist/
+*.bak
+*.tmp
+*.tar.gz
+*.zip
+
+# --- Tkinter / CustomTkinter cache ---
+*.tcl
+*.tk
+venv/
