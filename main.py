@@ -134,26 +134,36 @@ def add_worker():
     cam_label.pack()
 
     captured = [None]
-    face_detected = [False]
+    captured_time = [0]
 
     def show():
-        ret, frame = cap.read()
-        if not ret:
-            return
-        frame = cv2.flip(frame, 1)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        # Draw face box
-        locations = face_recognition.face_locations(rgb)
-        for (top, right, bottom, left) in locations:
-            cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-
-        # Auto-capture on first face
-        if locations and not face_detected[0]:
-            face_detected[0] = True
-            captured[0] = frame.copy()
-            info_label.configure(text="Face captured! Retake or Save?")
-            speak("Зураг авлаа")
+        current_time = time.time()
+        if captured[0] is not None:
+            frame = captured[0].copy()  # Static photo
+            # Redraw box on static
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            locations = face_recognition.face_locations(rgb)
+            for (top, right, bottom, left) in locations:
+                cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                cv2.putText(frame, "Unknown", (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        else:
+            ret, frame = cap.read()
+            if not ret:
+                preview.after(30, show)
+                return
+            frame = cv2.flip(frame, 1)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            locations = face_recognition.face_locations(rgb)
+            # Draw box
+            for (top, right, bottom, left) in locations:
+                cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                cv2.putText(frame, "Unknown", (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            # Auto-capture if face detected and timeout passed
+            if locations and current_time - captured_time[0] > 1:  # 1 sec debounce
+                captured[0] = frame.copy()
+                captured_time[0] = current_time
+                info_label.configure(text="Face captured! Retake or Save?")
+                speak("Зураг авлаа")
 
         img = ctk.CTkImage(light_image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)),
                            dark_image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)),
@@ -164,15 +174,14 @@ def add_worker():
 
     show()
 
-    # Buttons
     btns = ctk.CTkFrame(preview)
     btns.pack(pady=8)
-    ctk.CTkButton(btns, text="Retake", command=lambda: reset_capture(captured, face_detected)).grid(row=0, column=0, padx=8)
+    ctk.CTkButton(btns, text="Retake", command=lambda: reset_capture(captured, captured_time)).grid(row=0, column=0, padx=8)
     ctk.CTkButton(btns, text="Save Photo", command=lambda: save_photo_and_form(captured[0], cap, preview)).grid(row=0, column=1, padx=8)
 
-def reset_capture(captured, face_detected):
+def reset_capture(captured, captured_time):
     captured[0] = None
-    face_detected[0] = False
+    captured_time[0] = 0
     info_label.configure(text="Look at camera again...")
 
 def save_photo_and_form(photo_frame, cap, preview_win):
@@ -181,7 +190,7 @@ def save_photo_and_form(photo_frame, cap, preview_win):
     preview_win.destroy()
 
     if photo_frame is None:
-        info_label.configure(text="No photo to save!")
+        info_label.configure(text="No photo captured! Try again.")
         return
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -213,6 +222,7 @@ def open_registration_form():
         entries[f] = e
 
     def save():
+        global pending_photo_path
         name = entries["Full Name"].get().strip()
         if not name:
             info_label.configure(text="Name required!")
@@ -240,6 +250,7 @@ def open_registration_form():
         pending_photo_path = None
 
     def on_close():
+        global pending_photo_path
         if pending_photo_path and os.path.exists(pending_photo_path):
             os.remove(pending_photo_path)
         pending_photo_path = None
@@ -277,7 +288,7 @@ def show_all_logs():
 active_workers = {}
 
 def recognize_once():
-    global pending_photo_path
+    global active_workers
     info_label.configure(text="Look at camera...")
     app.update()
 
@@ -294,34 +305,47 @@ def recognize_once():
 
     captured = [None]
     detected_name = [None]
+    captured_time = [0]
 
     def show():
-        ret, frame = cap.read()
-        if not ret:
-            return
-        frame = cv2.flip(frame, 1)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        locations = face_recognition.face_locations(rgb)
-        encodings = face_recognition.face_encodings(rgb, locations)
-
-        name = "Unknown"
-        if encodings:
-            matches = face_recognition.compare_faces(known_face_encodings, encodings[0], tolerance=0.55)
-            if True in matches:
-                idx = matches.index(True)
-                name = known_face_names[idx]
-                detected_name[0] = name
-
-            # Auto-capture
-            if not captured[0]:
-                captured[0] = frame.copy()
-                info_label.configure(text=f"{name} detected! Save or Retake?")
-
-            # Draw box + name
-            for (top, right, bottom, left), enc in zip(locations, encodings):
+        current_time = time.time()
+        if captured[0] is not None:
+            frame = captured[0].copy()  # Static photo
+            # Redraw box + name on static
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            locations = face_recognition.face_locations(rgb)
+            for (top, right, bottom, left) in locations:
                 cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-                cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                cv2.putText(frame, detected_name[0] or "Unknown", (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        else:
+            ret, frame = cap.read()
+            if not ret:
+                preview.after(30, show)
+                return
+            frame = cv2.flip(frame, 1)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            locations = face_recognition.face_locations(rgb)
+            encodings = face_recognition.face_encodings(rgb, locations)
+
+            name = "Unknown"
+            if encodings:
+                matches = face_recognition.compare_faces(known_face_encodings, encodings[0], tolerance=0.55)
+                if True in matches:
+                    idx = matches.index(True)
+                    name = known_face_names[idx]
+                    detected_name[0] = name
+
+                # Draw box + name
+                for (top, right, bottom, left) in locations:
+                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                    cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+                # Auto-capture if face detected and timeout passed
+                if locations and current_time - captured_time[0] > 1:  # 1 sec debounce
+                    captured[0] = frame.copy()
+                    captured_time[0] = current_time
+                    info_label.configure(text=f"{name} detected! Save or Retake?")
+                    speak("Зураг авлаа")
 
         img = ctk.CTkImage(light_image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)),
                            dark_image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)),
@@ -334,16 +358,22 @@ def recognize_once():
 
     btns = ctk.CTkFrame(preview)
     btns.pack(pady=8)
-    ctk.CTkButton(btns, text="Retake", command=lambda: reset_recognition(captured)).grid(row=0, column=0, padx=8)
+    ctk.CTkButton(btns, text="Retake", command=lambda: reset_recognition(captured, captured_time)).grid(row=0, column=0, padx=8)
     ctk.CTkButton(btns, text="Save & Log", command=lambda: save_and_log(captured[0], detected_name[0], cap, preview)).grid(row=0, column=1, padx=8)
 
-def reset_recognition(captured):
+def reset_recognition(captured, captured_time):
     captured[0] = None
+    captured_time[0] = 0
     info_label.configure(text="Look at camera again...")
 
 def save_and_log(photo_frame, name, cap, preview_win):
+    global active_workers
     cap.release()
     preview_win.destroy()
+
+    if photo_frame is None:
+        info_label.configure(text="No photo captured! Try again.")
+        return
 
     if name == "Unknown":
         speak("Танихгүй хүн")
@@ -378,7 +408,7 @@ def toggle_sens1():
 
 def toggle_gerel():
     global gerel_state
-    gerel_state = not gerel_state
+    gerel_state = not sens1_state
     state = "ON" if gerel_state else "OFF"
     gerel_btn.configure(text=f"Gerel: {state}")
     speak(f"Гэрэл {state.lower()}")
