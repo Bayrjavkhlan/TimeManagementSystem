@@ -408,7 +408,7 @@ def toggle_sens1():
 
 def toggle_gerel():
     global gerel_state
-    gerel_state = not sens1_state
+    gerel_state = not gerel_state
     state = "ON" if gerel_state else "OFF"
     gerel_btn.configure(text=f"Gerel: {state}")
     speak(f"Гэрэл {state.lower()}")
