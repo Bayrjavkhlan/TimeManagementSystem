@@ -5,36 +5,65 @@ import numpy as np
 import os
 import time
 import datetime
-from PIL import Image, ImageTk
+from PIL import Image
 import threading
-import pyttsx3   # <-- text-to-speech
+import pyttsx3
+from gtts import gTTS
+import pygame
+import tempfile
+import shutil
 
 # -------------------------------------------------
 # Folders
 # -------------------------------------------------
 os.makedirs("known_faces", exist_ok=True)
 os.makedirs("worker_data", exist_ok=True)
+os.makedirs("pending_photos", exist_ok=True)
 
 # -------------------------------------------------
-# Voice engine (Mongolian works if the voice is installed)
+# pygame init
 # -------------------------------------------------
-tts = pyttsx3.init()
-# Try to set Mongolian voice – fallback to default
-voices = tts.getProperty('voices')
-for v in voices:
-    if 'mongolian' in v.name.lower() or 'mn' in v.id.lower():
-        tts.setProperty('voice', v.id)
-        break
-
-def speak(text: str):
-    # Run in a thread so the GUI never freezes
-    def _run():
-        tts.say(text)
-        tts.runAndWait()
-    threading.Thread(target=_run, daemon=True).start()
+pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
 
 # -------------------------------------------------
-# Load known faces (encodings + names)
+# TTS
+# -------------------------------------------------
+tts_local = None
+try:
+    tts_local = pyttsx3.init()
+except:
+    tts_local = None
+
+def speak(text: str, lang: str = "mn"):
+    def _play_gtts():
+        try:
+            t = gTTS(text=text, lang=lang, slow=False)
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+            t.save(tmp.name)
+            pygame.mixer.music.load(tmp.name)
+            pygame.mixer.music.play()
+            while pygame.mixer.music.get_busy():
+                pygame.time.wait(100)
+            os.unlink(tmp.name)
+        except Exception:
+            _play_espeak()
+
+    def _play_espeak():
+        if tts_local:
+            def _run():
+                try:
+                    tts_local.say(text)
+                    tts_local.runAndWait()
+                except:
+                    pass
+            threading.Thread(target=_run, daemon=True).start()
+        else:
+            print(f"[VOICE] {text}")
+
+    threading.Thread(target=_play_gtts, daemon=True).start()
+
+# -------------------------------------------------
+# Load known faces
 # -------------------------------------------------
 def load_known_faces():
     encodings, names = [], []
@@ -50,30 +79,26 @@ def load_known_faces():
 known_face_encodings, known_face_names = load_known_faces()
 
 # -------------------------------------------------
-# Helper: write worker info file
+# Helper: log time
 # -------------------------------------------------
-def save_worker_info(name: str, info: dict, photo_path: str):
-    txt_path = os.path.join("worker_data", f"{name.replace(' ', '_')}.txt")
-    with open(txt_path, "w", encoding="utf-8") as f:
-        for k, v in info.items():
-            f.write(f"{k}: {v}\n")
-    # also save the photo
-    cv2.imwrite(photo_path, cv2.imread("temp_worker.jpg"))
-    os.remove("temp_worker.jpg")
+def log_time(name: str, action: str):
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    with open("time_logs.txt", "a", encoding="utf-8") as f:
+        f.write(f"{name},{action},{ts}\n")
+    return ts
 
 # -------------------------------------------------
 # GUI – main window
 # -------------------------------------------------
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
-
 app = ctk.CTk()
 app.title("Time Management System")
-app.geometry("520x380")
+app.geometry("560x460")
 
-# ---- Clock -------------------------------------------------
+# Clock
 date_label = ctk.CTkLabel(app, text="", font=("Arial", 20, "bold"))
-date_label.pack(pady=(10, 0))
+date_label.pack(pady=(15, 0))
 time_label = ctk.CTkLabel(app, text="", font=("Arial", 42, "bold"))
 time_label.pack(pady=(0, 10))
 
@@ -84,15 +109,17 @@ def update_clock():
     app.after(1000, update_clock)
 update_clock()
 
-# ---- Info label --------------------------------------------
 info_label = ctk.CTkLabel(app, text="Select an action below", font=("Arial", 16))
 info_label.pack(pady=10)
 
 # -------------------------------------------------
-# 1. Add new worker (camera → form)
+# 1. Add New Worker – AUTO FACE DETECT + CAPTURE
 # -------------------------------------------------
+pending_photo_path = None
+
 def add_worker():
-    info_label.configure(text="Opening camera…")
+    global pending_photo_path
+    info_label.configure(text="Look at camera to capture face...")
     app.update()
 
     cap = cv2.VideoCapture(0)
@@ -100,49 +127,78 @@ def add_worker():
         info_label.configure(text="Camera not found!")
         return
 
-    # ---- preview window ---------------------------------
     preview = ctk.CTkToplevel(app)
-    preview.title("Capture Photo")
+    preview.title("Add New Worker")
     preview.geometry("680x520")
     cam_label = ctk.CTkLabel(preview, text="")
     cam_label.pack()
 
-    captured = [None]          # mutable container
+    captured = [None]
+    face_detected = [False]
 
     def show():
         ret, frame = cap.read()
-        if ret:
-            frame = cv2.flip(frame, 1)
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = ctk.CTkImage(light_image=Image.fromarray(rgb),
-                               dark_image=Image.fromarray(rgb),
-                               size=(640, 360))
-            cam_label.configure(image=img)
-            cam_label.image = img
+        if not ret:
+            return
+        frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Draw face box
+        locations = face_recognition.face_locations(rgb)
+        for (top, right, bottom, left) in locations:
+            cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+
+        # Auto-capture on first face
+        if locations and not face_detected[0]:
+            face_detected[0] = True
+            captured[0] = frame.copy()
+            info_label.configure(text="Face captured! Retake or Save?")
+            speak("Зураг авлаа")
+
+        img = ctk.CTkImage(light_image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)),
+                           dark_image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)),
+                           size=(640, 360))
+        cam_label.configure(image=img)
+        cam_label.image = img
         preview.after(30, show)
+
     show()
 
-    # ---- capture ---------------------------------------
-    def take():
-        ret, frame = cap.read()
-        if ret:
-            cv2.imwrite("temp_worker.jpg", frame)
-            captured[0] = frame
-            info_label.configure(text="Photo taken – you can retake or save")
-    take()
-
+    # Buttons
     btns = ctk.CTkFrame(preview)
     btns.pack(pady=8)
-    ctk.CTkButton(btns, text="Retake", command=take).grid(row=0, column=0, padx=8)
-    ctk.CTkButton(btns, text="Save", command=lambda: save_and_form(captured[0], cap, preview)).grid(row=0, column=1, padx=8)
+    ctk.CTkButton(btns, text="Retake", command=lambda: reset_capture(captured, face_detected)).grid(row=0, column=0, padx=8)
+    ctk.CTkButton(btns, text="Save Photo", command=lambda: save_photo_and_form(captured[0], cap, preview)).grid(row=0, column=1, padx=8)
 
-# -------------------------------------------------
-def save_and_form(photo_frame, cap, preview_win):
+def reset_capture(captured, face_detected):
+    captured[0] = None
+    face_detected[0] = False
+    info_label.configure(text="Look at camera again...")
+
+def save_photo_and_form(photo_frame, cap, preview_win):
+    global pending_photo_path
     cap.release()
     preview_win.destroy()
-    open_registration_form(photo_frame)
 
-def open_registration_form(photo_frame):
+    if photo_frame is None:
+        info_label.configure(text="No photo to save!")
+        return
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    pending_photo_path = f"pending_photos/photo_{timestamp}.jpg"
+    cv2.imwrite(pending_photo_path, photo_frame)
+    info_label.configure(text="Photo saved! Fill the form.")
+    open_registration_form()
+
+# -------------------------------------------------
+# Registration Form
+# -------------------------------------------------
+def open_registration_form():
+    global pending_photo_path
+    if not pending_photo_path or not os.path.exists(pending_photo_path):
+        info_label.configure(text="No photo found!")
+        return
+
     form = ctk.CTkToplevel(app)
     form.title("Worker Registration")
     form.geometry("360x420")
@@ -162,152 +218,186 @@ def open_registration_form(photo_frame):
             info_label.configure(text="Name required!")
             return
         name_key = name.replace(" ", "_")
-        photo_path = f"known_faces/{name_key}.jpg"
+        final_path = f"known_faces/{name_key}.jpg"
+
+        try:
+            shutil.move(pending_photo_path, final_path)
+        except Exception as e:
+            info_label.configure(text=f"Save failed: {e}")
+            return
+
         info = {k: v.get().strip() for k, v in entries.items()}
-        save_worker_info(name, info, photo_path)
+        txt_path = os.path.join("worker_data", f"{name_key}.txt")
+        with open(txt_path, "w", encoding="utf-8") as f:
+            for k, v in info.items():
+                f.write(f"{k}: {v}\n")
 
         global known_face_encodings, known_face_names
         known_face_encodings, known_face_names = load_known_faces()
-
-        speak(f"{name} registered")
+        speak(f"{name} бүртгэгдлээ")
         info_label.configure(text=f"{name} registered!")
         form.destroy()
+        pending_photo_path = None
 
+    def on_close():
+        if pending_photo_path and os.path.exists(pending_photo_path):
+            os.remove(pending_photo_path)
+        pending_photo_path = None
+        form.destroy()
+
+    form.protocol("WM_DELETE_WINDOW", on_close)
     ctk.CTkButton(form, text="Register", command=save).pack(pady=15)
 
 # -------------------------------------------------
-# 2. Show all logs
+# 2. Show All Logs
 # -------------------------------------------------
 def show_all_logs():
     log_win = ctk.CTkToplevel(app)
     log_win.title("Time Logs")
-    log_win.geometry("720x540")
-
+    log_win.geometry("780x580")
     txt = ctk.CTkTextbox(log_win, font=("Courier", 14))
     txt.pack(fill="both", expand=True, padx=12, pady=12)
-
     if os.path.exists("time_logs.txt"):
         with open("time_logs.txt", "r", encoding="utf-8") as f:
             lines = f.readlines()
-        # pretty table
         header = f"{'Name':<20} {'Action':<8} {'Timestamp':<20}\n"
-        header += "-"*50 + "\n"
+        header += "-"*52 + "\n"
         txt.insert("end", header)
         for line in lines:
-            name, action, ts = line.strip().split(",", 2)
-            txt.insert("end", f"{name:<20} {action:<8} {ts:<20}\n")
+            parts = line.strip().split(",", 2)
+            if len(parts) == 3:
+                name, action, ts = parts
+                txt.insert("end", f"{name:<20} {action:<8} {ts:<20}\n")
     else:
         txt.insert("end", "No logs yet.\n")
 
 # -------------------------------------------------
-# 3. Recognition loop (continuous)
+# 3. Recognize Face – SHOW USERNAME + RETAKE/SAVE
 # -------------------------------------------------
-recognition_running = False
-recognition_thread = None
+active_workers = {}
 
-# keep track of who is currently "IN"
-active_workers = {}   # name -> last IN timestamp
+def recognize_once():
+    global pending_photo_path
+    info_label.configure(text="Look at camera...")
+    app.update()
 
-def log_time(name: str, action: str):
-    ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    with open("time_logs.txt", "a", encoding="utf-8") as f:
-        f.write(f"{name},{action},{ts}\n")
-    return ts
-
-def recognition_loop():
-    global recognition_running
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         info_label.configure(text="Camera error!")
         return
 
-    info_label.configure(text="Recognition active – look at the camera")
-    while recognition_running:
+    preview = ctk.CTkToplevel(app)
+    preview.title("Recognize Face")
+    preview.geometry("680x520")
+    cam_label = ctk.CTkLabel(preview, text="")
+    cam_label.pack()
+
+    captured = [None]
+    detected_name = [None]
+
+    def show():
         ret, frame = cap.read()
         if not ret:
-            continue
+            return
         frame = cv2.flip(frame, 1)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         locations = face_recognition.face_locations(rgb)
         encodings = face_recognition.face_encodings(rgb, locations)
 
-        for enc in encodings:
-            matches = face_recognition.compare_faces(known_face_encodings, enc, tolerance=0.55)
-            name = "Unknown"
+        name = "Unknown"
+        if encodings:
+            matches = face_recognition.compare_faces(known_face_encodings, encodings[0], tolerance=0.55)
             if True in matches:
                 idx = matches.index(True)
                 name = known_face_names[idx]
+                detected_name[0] = name
 
-            # ---------- known worker ----------
-            if name != "Unknown":
-                if name not in active_workers:                # first appearance → IN
-                    ts = log_time(name, "IN")
-                    active_workers[name] = ts
-                    speak(f"Welcome {name}")
-                    info_label.configure(text=f"{name} – IN at {ts.split()[1]}")
-                else:                                         # already IN → OUT
-                    in_ts = active_workers.pop(name)
-                    out_ts = log_time(name, "OUT")
-                    speak(f"Goodbye {name}")
-                    info_label.configure(text=f"{name} – OUT at {out_ts.split()[1]}")
-                # short pause so the same face isn’t processed many times
-                time.sleep(2.5)
+            # Auto-capture
+            if not captured[0]:
+                captured[0] = frame.copy()
+                info_label.configure(text=f"{name} detected! Save or Retake?")
 
-            # ---------- unknown → register ----------
-            else:
-                # stop camera, ask user to fill form
-                recognition_running = False
-                cap.release()
-                info_label.configure(text="Unknown face – please register")
-                speak("Unknown person, please register")
-                # take a photo automatically for the form
-                cv2.imwrite("temp_worker.jpg", frame)
-                app.after(500, lambda: open_registration_form(frame))
-                return
+            # Draw box + name
+            for (top, right, bottom, left), enc in zip(locations, encodings):
+                cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-        # tiny delay
-        time.sleep(0.05)
+        img = ctk.CTkImage(light_image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)),
+                           dark_image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)),
+                           size=(640, 360))
+        cam_label.configure(image=img)
+        cam_label.image = img
+        preview.after(30, show)
 
+    show()
+
+    btns = ctk.CTkFrame(preview)
+    btns.pack(pady=8)
+    ctk.CTkButton(btns, text="Retake", command=lambda: reset_recognition(captured)).grid(row=0, column=0, padx=8)
+    ctk.CTkButton(btns, text="Save & Log", command=lambda: save_and_log(captured[0], detected_name[0], cap, preview)).grid(row=0, column=1, padx=8)
+
+def reset_recognition(captured):
+    captured[0] = None
+    info_label.configure(text="Look at camera again...")
+
+def save_and_log(photo_frame, name, cap, preview_win):
     cap.release()
-    info_label.configure(text="Recognition stopped")
+    preview_win.destroy()
 
-def start_recognition():
-    global recognition_running, recognition_thread
-    if recognition_running:
+    if name == "Unknown":
+        speak("Танихгүй хүн")
+        info_label.configure(text="Unknown face")
         return
-    recognition_running = True
-    recognition_thread = threading.Thread(target=recognition_loop, daemon=True)
-    recognition_thread.start()
 
-def stop_recognition():
-    global recognition_running
-    recognition_running = False
-    info_label.configure(text="Select an action below")
+    if name not in active_workers:
+        ts = log_time(name, "IN")
+        active_workers[name] = ts
+        speak(f"{name} ирлээ")
+        info_label.configure(text=f"{name} – IN at {ts.split()[1]}")
+    else:
+        in_ts = active_workers.pop(name)
+        out_ts = log_time(name, "OUT")
+        speak(f"{name} явлаа")
+        info_label.configure(text=f"{name} – OUT at {out_ts.split()[1]}")
 
-def sens1_action():
-    info_label.configure(text="Sens1 button pressed")
-    
-def sens2_action():
-    info_label.configure(text="Sens2 button pressed")
-    
-def gerel1_action():
-    info_label.configure(text="Gerel1 button pressed")
+    app.after(2000, lambda: info_label.configure(text="Select an action below"))
 
 # -------------------------------------------------
-# Buttons
+# 4. Sens1 & Gerel Toggle Buttons
+# -------------------------------------------------
+sens1_state = False
+gerel_state = False
+
+def toggle_sens1():
+    global sens1_state
+    sens1_state = not sens1_state
+    state = "ON" if sens1_state else "OFF"
+    sens1_btn.configure(text=f"Sens1: {state}")
+    speak(f"Сенс1 {state.lower()}")
+
+def toggle_gerel():
+    global gerel_state
+    gerel_state = not gerel_state
+    state = "ON" if gerel_state else "OFF"
+    gerel_btn.configure(text=f"Gerel: {state}")
+    speak(f"Гэрэл {state.lower()}")
+
+# -------------------------------------------------
+# Buttons Layout
 # -------------------------------------------------
 btn_frame = ctk.CTkFrame(app)
 btn_frame.pack(pady=12)
 
 ctk.CTkButton(btn_frame, text="Add New Worker", width=180, command=add_worker).grid(row=0, column=0, padx=8, pady=4)
 ctk.CTkButton(btn_frame, text="Show All Logs", width=180, command=show_all_logs).grid(row=0, column=1, padx=8, pady=4)
-ctk.CTkButton(btn_frame, text="Start Recognition", width=180, command=start_recognition).grid(row=1, column=0, padx=8, pady=4)
-ctk.CTkButton(btn_frame, text="Stop Recognition", width=180, command=stop_recognition).grid(row=1, column=1, padx=8, pady=4)
-ctk.CTkButton(btn_frame, text="Sens1", width=180, command=stop_recognition).grid(row=1, column=1, padx=8, pady=4)
-ctk.CTkButton(btn_frame, text="Sens2", width=180, command=stop_recognition).grid(row=1, column=1, padx=8, pady=4)
-ctk.CTkButton(btn_frame, text="Gerel1", width=180, command=stop_recognition).grid(row=1, column=1, padx=8, pady=4)
 
+ctk.CTkButton(btn_frame, text="Recognize Face", width=180, command=recognize_once).grid(row=1, column=0, padx=8, pady=4)
+sens1_btn = ctk.CTkButton(btn_frame, text="Sens1: OFF", width=180, command=toggle_sens1)
+sens1_btn.grid(row=1, column=1, padx=8, pady=4)
+
+gerel_btn = ctk.CTkButton(btn_frame, text="Gerel: OFF", width=180, command=toggle_gerel)
+gerel_btn.grid(row=2, column=0, padx=8, pady=4, columnspan=2)
 
 # -------------------------------------------------
 app.mainloop()
