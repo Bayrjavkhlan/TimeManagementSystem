@@ -18,7 +18,6 @@ ENV/
 
 # --- Logs ---
 *.log
-*.txt
 
 # --- Face Data & Generated Files ---
 known_faces/
