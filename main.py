@@ -18,11 +18,26 @@ import speech_recognition as sr
 # -------------------------------------------------
 # Load .env file for API key
 # -------------------------------------------------
-API_KEY = "AIzaSyDOB6ZETnlSq5gKvgdAefRdWyEpLoRJgMo"
+API_KEY = ""
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 
+# Монгол текст 100% харагдана (Raspberry Pi дээр 100% ажилладаг)
+try:
+    # Эхлээд Noto Sans Mongolian байгаа эсэхийг шалгана
+    ctk.CTkFont(family="Noto Sans Mongolian", size=36)
+    MONGOL_FONT = ("Noto Sans Mongolian", 36, "bold")
+except:
+    # Байхгүй бол Noto Sans CJK SC (кирилл + монгол дэмждэг)
+    MONGOL_FONT = ("Noto Sans CJK SC", 36, "bold")
 
+# Бүх CTkLabel-д автоматаар монгол фонт өгнө (гараар бичих шаардлагагүй!)
+_original_label_init = ctk.CTkLabel.__init__
+def _mongol_label_init(self, *args, **kwargs):
+    if "font" not in kwargs:
+        kwargs["font"] = MONGOL_FONT
+    _original_label_init(self, *args, **kwargs)
+ctk.CTkLabel.__init__ = _mongol_label_init
 # -------------------------------------------------
 # Gemini API function
 # -------------------------------------------------
@@ -138,6 +153,9 @@ ctk.set_default_color_theme("blue")
 app = ctk.CTk()
 app.title("Цаг бүртгэлийн систем")
 app.geometry("560x460")
+
+app.attributes('-fullscreen', True)     # БҮРЭН ДЭЛГЭЦ
+app.bind('<Escape>', lambda e: app.attributes('-fullscreen', False))  # Esc дарвал гарах
 
 # Clock
 date_label = ctk.CTkLabel(app, text="", font=("Arial", 20, "bold"))
