@@ -18,8 +18,10 @@ import speech_recognition as sr
 # -------------------------------------------------
 # Load .env file for API key
 # -------------------------------------------------
-API_KEY = ""
+API_KEY = "AIzaSyDOB6ZETnlSq5gKvgdAefRdWyEpLoRJgMo"
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+
 
 # -------------------------------------------------
 # Gemini API function
@@ -134,7 +136,7 @@ def log_time(name: str, action: str):
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 app = ctk.CTk()
-app.title("Time Management System")
+app.title("Цаг бүртгэлийн систем")
 app.geometry("560x460")
 
 # Clock
@@ -150,7 +152,7 @@ def update_clock():
     app.after(1000, update_clock)
 update_clock()
 
-info_label = ctk.CTkLabel(app, text="Select an action below", font=("Arial", 16))
+info_label = ctk.CTkLabel(app, text="Доорх үйлдэлээс сонгоно уу?", font=("Arial", 16))
 info_label.pack(pady=10)
 
 # -------------------------------------------------
@@ -160,16 +162,16 @@ pending_photo_path = None
 
 def add_worker():
     global pending_photo_path
-    info_label.configure(text="Look at camera to capture face...")
+    info_label.configure(text="Камерлуу хараарай...")
     app.update()
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        info_label.configure(text="Camera not found!")
+        info_label.configure(text="Камер олдсонгүй!")
         return
 
     preview = ctk.CTkToplevel(app)
-    preview.title("Add New Worker")
+    preview.title("Шинэ ажилтан нэмэх")
     preview.geometry("680x520")
     cam_label = ctk.CTkLabel(preview, text="")
     cam_label.pack()
@@ -203,7 +205,7 @@ def add_worker():
             if locations and current_time - captured_time[0] > 1:  # 1 sec debounce
                 captured[0] = frame.copy()
                 captured_time[0] = current_time
-                info_label.configure(text="Face captured! Retake or Save?")
+                info_label.configure(text="Царай танигдлаа! Дахин таниулах эсвэл Хадгалах?")
                 speak("Зураг авлаа")
 
         img = ctk.CTkImage(light_image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)),
@@ -217,13 +219,13 @@ def add_worker():
 
     btns = ctk.CTkFrame(preview)
     btns.pack(pady=8)
-    ctk.CTkButton(btns, text="Retake", command=lambda: reset_capture(captured, captured_time)).grid(row=0, column=0, padx=8)
-    ctk.CTkButton(btns, text="Save Photo", command=lambda: save_photo_and_form(captured[0], cap, preview)).grid(row=0, column=1, padx=8)
+    ctk.CTkButton(btns, text="Дахин таниулах", command=lambda: reset_capture(captured, captured_time)).grid(row=0, column=0, padx=8)
+    ctk.CTkButton(btns, text="Хадгалах", command=lambda: save_photo_and_form(captured[0], cap, preview)).grid(row=0, column=1, padx=8)
 
     def reset_capture(captured, captured_time):
         captured[0] = None
         captured_time[0] = 0
-        info_label.configure(text="Look at camera again...")
+        info_label.configure(text="Камерлуу ахиад хараарай...")
 
     def save_photo_and_form(photo_frame, cap, preview_win):
         global pending_photo_path
@@ -231,13 +233,13 @@ def add_worker():
         preview_win.destroy()
 
         if photo_frame is None:
-            info_label.configure(text="No photo captured! Try again.")
+            info_label.configure(text="Царай танихад алдаа гарлаа! Дахиад оролдоно уу.")
             return
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         pending_photo_path = f"pending_photos/photo_{timestamp}.jpg"
         cv2.imwrite(pending_photo_path, photo_frame)
-        info_label.configure(text="Photo saved! Fill the form.")
+        info_label.configure(text="Зураг хадгалагдлаа! Ажилтны мэдээлэлийг оруулна уу.")
         open_registration_form()
 
 # -------------------------------------------------
@@ -246,7 +248,7 @@ def add_worker():
 def open_registration_form():
     global pending_photo_path
     if not pending_photo_path or not os.path.exists(pending_photo_path):
-        info_label.configure(text="No photo found!")
+        info_label.configure(text="Царай хадгалагдсангүй! Дахин оролдоно уу.")
         return
 
     form = ctk.CTkToplevel(app)
@@ -254,7 +256,7 @@ def open_registration_form():
     form.geometry("360x420")
     ctk.CTkLabel(form, text="Worker Information", font=("Arial", 18, "bold")).pack(pady=12)
 
-    fields = ["Full Name", "Employee ID", "Department", "Position"]
+    fields = ["Ажилтны нэр", "Ажилтны ID", "Хэлтэс", "Албан тушаал"]
     entries = {}
     for f in fields:
         ctk.CTkLabel(form, text=f).pack()
@@ -266,7 +268,7 @@ def open_registration_form():
         global pending_photo_path
         name = entries["Full Name"].get().strip()
         if not name:
-            info_label.configure(text="Name required!")
+            info_label.configure(text="Ажилтны нэр оруулна уу!")
             return
         name_key = name.replace(" ", "_")
         final_path = f"known_faces/{name_key}.jpg"
@@ -274,7 +276,7 @@ def open_registration_form():
         try:
             shutil.move(pending_photo_path, final_path)
         except Exception as e:
-            info_label.configure(text=f"Save failed: {e}")
+            info_label.configure(text=f"Хадгалахад алдаа гарлаа: {e}")
             return
 
         info = {k: v.get().strip() for k, v in entries.items()}
@@ -286,7 +288,7 @@ def open_registration_form():
         global known_face_encodings, known_face_names
         known_face_encodings, known_face_names = load_known_faces()
         speak(f"{name} бүртгэгдлээ")
-        info_label.configure(text=f"{name} registered!")
+        info_label.configure(text=f"{name} бүртгэгдлээ!")
         form.destroy()
         pending_photo_path = None
 
@@ -305,7 +307,7 @@ def open_registration_form():
 # -------------------------------------------------
 def show_all_logs():
     log_win = ctk.CTkToplevel(app)
-    log_win.title("Time Logs")
+    log_win.title("Ирцийн бүртгэл")
     log_win.geometry("780x580")
     txt = ctk.CTkTextbox(log_win, font=("Courier", 14))
     txt.pack(fill="both", expand=True, padx=12, pady=12)
@@ -321,7 +323,7 @@ def show_all_logs():
                 name, action, ts = parts
                 txt.insert("end", f"{name:<20} {action:<8} {ts:<20}\n")
     else:
-        txt.insert("end", "No logs yet.\n")
+        txt.insert("end", "Бүртгэл хоосон байна.\n")
 
 # -------------------------------------------------
 # 3. Recognize Face – SHOW USERNAME + RETAKE/SAVE
@@ -330,16 +332,16 @@ active_workers = {}
 
 def recognize_once():
     global active_workers
-    info_label.configure(text="Look at camera...")
+    info_label.configure(text="Камерлуу хараарай...")
     app.update()
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        info_label.configure(text="Camera error!")
+        info_label.configure(text="Камер олдсонгүй!")
         return
 
     preview = ctk.CTkToplevel(app)
-    preview.title("Recognize Face")
+    preview.title("Царай таних")
     preview.geometry("680x520")
     cam_label = ctk.CTkLabel(preview, text="")
     cam_label.pack()
@@ -385,7 +387,7 @@ def recognize_once():
             if locations and current_time - captured_time[0] > 1:  # 1 sec debounce
                 captured[0] = frame.copy()
                 captured_time[0] = current_time
-                info_label.configure(text=f"{name} detected! Save or Retake?")
+                info_label.configure(text=f"{name} танигдлаа! Бүртгэх эсвэл дахин авах?")
                 speak("Зураг авлаа")
 
         img = ctk.CTkImage(light_image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)),
@@ -399,13 +401,13 @@ def recognize_once():
 
     btns = ctk.CTkFrame(preview)
     btns.pack(pady=8)
-    ctk.CTkButton(btns, text="Retake", command=lambda: reset_recognition(captured, captured_time)).grid(row=0, column=0, padx=8)
-    ctk.CTkButton(btns, text="Save & Log", command=lambda: save_and_log(captured[0], detected_name[0], cap, preview)).grid(row=0, column=1, padx=8)
+    ctk.CTkButton(btns, text="Дахин авах", command=lambda: reset_recognition(captured, captured_time)).grid(row=0, column=0, padx=8)
+    ctk.CTkButton(btns, text="Бүртгэх", command=lambda: save_and_log(captured[0], detected_name[0], cap, preview)).grid(row=0, column=1, padx=8)
 
     def reset_recognition(captured, captured_time):
         captured[0] = None
         captured_time[0] = 0
-        info_label.configure(text="Look at camera again...")
+        info_label.configure(text="Камерлуу хараарай...")
 
     def save_and_log(photo_frame, name, cap, preview_win):
         global active_workers
@@ -413,7 +415,7 @@ def recognize_once():
         preview_win.destroy()
 
         if photo_frame is None:
-            info_label.configure(text="No photo captured! Try again.")
+            info_label.configure(text="Царай танигдсангүй! Дахин оролдох.")
             return
 
         if name == "Unknown":
@@ -432,7 +434,7 @@ def recognize_once():
             speak(f"{name} явлаа")
             info_label.configure(text=f"{name} – OUT at {out_ts.split()[1]}")
 
-        app.after(2000, lambda: info_label.configure(text="Select an action below"))
+        app.after(2000, lambda: info_label.configure(text="Үйлдэл сонгоно уу"))
 
 # -------------------------------------------------
 # 4. Sens1 & Gerel Toggle Buttons
@@ -440,74 +442,125 @@ def recognize_once():
 sens1_state = False
 gerel_state = False
 
+# ---------- Fan ----------
 def toggle_sens1():
     global sens1_state
     sens1_state = not sens1_state
-    state = "ON" if sens1_state else "OFF"
-    sens1_btn.configure(text=f"Sens1: {state}")
-    speak(f"Сенс1 {state.lower()}")
+    
+    if sens1_state:
+        sens1_btn.configure(text="Сэнс: АСААХ")
+        speak("Сэнс нэг асаалаа")
+    else:
+        sens1_btn.configure(text="Сэнс: УНТРААХ")
+        speak("Сэнс нэг унтраалаа")
 
+# ---------- Light ----------
 def toggle_gerel():
     global gerel_state
     gerel_state = not gerel_state
-    state = "ON" if gerel_state else "OFF"
-    gerel_btn.configure(text=f"Gerel: {state}")
-    speak(f"Гэрэл {state.lower()}")
-
+    
+    if gerel_state:
+        gerel_btn.configure(text="Гэрэл: АСААХ")
+        speak("Гэрэл асаалаа")
+    else:
+        gerel_btn.configure(text="Гэрэл: УНТРААХ")
+        speak("Гэрэл унтраалаа")
 # -------------------------------------------------
 # Gemini Assistant Button Functionality
 # -------------------------------------------------
-def gemini_assistant():
-    info_label.configure(text="Сонсож байна... 6 секунд ярь!")
-    speak("Ярь")
+# ==================== AI ТОВЧ – ТАСРАЛТГҮЙ СОНСООД ДАРАА НЬ ИЛГЭЭХ ====================
+ai_listening = False         # глобал төлөв
+ai_thread = None             # thread хадгалах
+ai_transcript = ""           # бүх яригдсан текст
+
+def toggle_ai():
+    global ai_listening, ai_thread, ai_transcript
+
+    if not ai_listening:                               # —— ЭХЛҮҮЛЭХ ——
+        ai_listening = True
+        ai_transcript = ""
+        ai_btn.configure(text="AI ЗОГС", fg_color="#FF3333", hover_color="#CC0000")
+        info_label.configure(text="Сонсож байна... ярьж эхэлнэ үү")
+        speak("Ярьж эхэлнэ үү")
+
+        # Тусдаа thread дээр тасралтгүй сонсоно
+        ai_thread = threading.Thread(target=continuous_listen, daemon=True)
+        ai_thread.start()
+
+    else:                                                      # —— ЗОГСООХ + ИЛГЭЭХ ——
+        ai_listening = False
+        ai_btn.configure(text="AI ажиллуулах", fg_color="#AA00FF", hover_color="#8800CC")
+        info_label.configure(text="Gemini-д илгээж байна...")
+
+def continuous_listen():
+    """Товч дарах хүртэл тасралтгүй сонсоод текстийг нэгтгэнэ"""
+    global ai_transcript
 
     r = sr.Recognizer()
-    r.energy_threshold = 300          # Микрофоны мэдрэмжийг бууруулах
+    r.energy_threshold = 300
     r.dynamic_energy_threshold = True
 
     with sr.Microphone() as source:
-        print("Микрофон идэвхжлээ, ярьж эхэл...")
-        r.adjust_for_ambient_noise(source, duration=0.8)  # Орчны дууг тохируулах
-        try:
-            audio = r.listen(source, timeout=8, phrase_time_limit=10)
-            info_label.configure(text="Google руу илгээж байна...")
-            text = r.recognize_google(audio, language="mn-MN")
-            print(f"Хэрэглэгч: {text}")
-            info_label.configure(text=f"Та: {text}")
+        r.adjust_for_ambient_noise(source, duration=1.0)
+        print("[AI] Сонсоож эхэллээ...")
 
-            response = ask_google_ai(text)
-            print(f"Gemini: {response}")
-            speak(response if response else "Хариу ирсэнгүй")
-            info_label.configure(text="Хариу дуугарлаа!")
+        while ai_listening:
+            try:
+                # 1 секундын timeout, гэхдээ 15 секунд хүртэл ярьж болно
+                audio = r.listen(source, timeout=1.0, phrase_time_limit=15)
+                text = r.recognize_google(audio, language="mn-MN")
 
-        except sr.WaitTimeoutError:
-            info_label.configure(text="Яриагүй эсвэл дууг сонссонгүй")
-            speak("Яриагүй байна")
-        except sr.UnknownValueError:
-            info_label.configure(text="Дууг ойлгосонгүй")
-            speak("Ойлгосонгүй")
-        except Exception as e:
-            info_label.configure(text="Алдаа гарлаа")
-            print("Gemini алдаа:", e)
+                ai_transcript += text + " "
+                # Хамгийн сүүлийн хэсгийг л дэлгэцэнд харуулна (хэт урт болохгүй)
+                app.after(0, lambda t=text: info_label.configure(
+                    text=f"Сонссон: ...{t[-60:]}"))
+            except sr.WaitTimeoutError:
+                continue                                 # чимээгүй байвал хүлээнэ
+            except sr.UnknownValueError:
+                continue
+            except Exception as e:
+                print("Сонсох алдаа:", e)
+                continue
 
-    app.after(4000, lambda: info_label.configure(text="Select an action below"))
+    # —— Товч дарагдаж зогссон үед энд ирнэ ——
+    if ai_transcript.strip():
+        app.after(0, lambda: info_label.configure(text="Gemini-д илгээж байна..."))
+        response = ask_google_ai(ai_transcript.strip())
+        app.after(0, lambda: info_label.configure(text="Хариу ирлээ!"))
+        speak(response)
+    else:
+        app.after(0, lambda: info_label.configure(text="Юу ч сонссонгүй"))
+        speak("Юу ч сонссонгүй")
+
+    app.after(3000, lambda: info_label.configure(text="Үйлдэл сонгоно уу"))
 # -------------------------------------------------
 # Buttons Layout
 # -------------------------------------------------
+# Эндээс доош бүх товчнуудыг том болгоно
 btn_frame = ctk.CTkFrame(app)
-btn_frame.pack(pady=12)
+btn_frame.pack(pady=40)  # илүү зай
 
-ctk.CTkButton(btn_frame, text="Add New Worker", width=180, command=add_worker).grid(row=0, column=0, padx=8, pady=4)
-ctk.CTkButton(btn_frame, text="Show All Logs", width=180, command=show_all_logs).grid(row=0, column=1, padx=8, pady=4)
+# Том товчны загвар
+BIG_BUTTON = {
+    "width": 350,          # 2 дахин том
+    "height": 100,         # өндөр
+    "font": ("Arial", 28, "bold"),
+    "corner_radius": 20
+}
 
-ctk.CTkButton(btn_frame, text="Recognize Face", width=180, command=recognize_once).grid(row=1, column=0, padx=8, pady=4)
-sens1_btn = ctk.CTkButton(btn_frame, text="Sens1: OFF", width=180, command=toggle_sens1)
-sens1_btn.grid(row=1, column=1, padx=8, pady=4)
+ctk.CTkButton(btn_frame, text="Ажилтан нэмэх",      command=add_worker,       **BIG_BUTTON, fg_color="#00AA33").grid(row=0, column=0, padx=30, pady=20)
+ctk.CTkButton(btn_frame, text="Ирцийн бүртгэл",    command=show_all_logs,    **BIG_BUTTON, fg_color="#FF8800").grid(row=0, column=1, padx=30, pady=20)
+ctk.CTkButton(btn_frame, text="Нүүр таних",        command=recognize_once,   **BIG_BUTTON, fg_color="#0066FF").grid(row=1, column=0, padx=30, pady=20)
 
-gerel_btn = ctk.CTkButton(btn_frame, text="Gerel: OFF", width=180, command=toggle_gerel)
-gerel_btn.grid(row=2, column=0, padx=8, pady=4)
+sens1_btn = ctk.CTkButton(btn_frame, text="Сэнс: УНТРААХ", command=toggle_sens1, **BIG_BUTTON, fg_color="#888888")
+sens1_btn.grid(row=1, column=1, padx=30, pady=20)
 
-ctk.CTkButton(btn_frame, text="Gemini Assistant", width=180, command=gemini_assistant).grid(row=2, column=1, padx=8, pady=4)
+gerel_btn = ctk.CTkButton(btn_frame, text="Гэрэл: УНТРААХ", command=toggle_gerel, **BIG_BUTTON, fg_color="#888888")
+gerel_btn.grid(row=2, column=0, padx=30, pady=20)
+
+ai_btn = ctk.CTkButton(btn_frame, text="AI ажиллуулах", command=toggle_ai,
+                       **BIG_BUTTON, fg_color="#AA00FF", hover_color="#8800CC")
+ai_btn.grid(row=2, column=1, padx=30, pady=20)
 
 # -------------------------------------------------
 app.mainloop()
