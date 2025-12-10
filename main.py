@@ -12,6 +12,47 @@ from gtts import gTTS
 import pygame
 import tempfile
 import shutil
+import requests
+import speech_recognition as sr
+
+# -------------------------------------------------
+# Load .env file for API key
+# -------------------------------------------------
+API_KEY = ""
+API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+# -------------------------------------------------
+# Gemini API function
+# -------------------------------------------------
+def ask_google_ai(prompt):
+    headers = {
+        "Content-Type": "application/json",
+        "X-goog-api-key": API_KEY
+    }
+    data = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+    try:
+        response = requests.post(API_URL, headers=headers, json=data)
+        response.raise_for_status()
+        result = response.json()
+        candidates = result.get("candidates", [])
+        if not candidates:
+            return f"No candidates in response: {result}"
+        # New API: content is a dict with 'parts' list
+        content_dict = candidates[0].get("content", {})
+        parts = content_dict.get("parts", [])
+        if not parts:
+            return f"No parts in content: {content_dict}"
+        # Join all text parts
+        answer = "".join([p.get("text", "") for p in parts])
+        return answer
+    except requests.exceptions.RequestException as e:
+        return f"HTTP error: {e}"
+    except ValueError:
+        return f"Failed to parse JSON: {response.text}"
+    except Exception as e:
+        return f"Unexpected error: {e}"
 
 # -------------------------------------------------
 # Folders
@@ -179,25 +220,25 @@ def add_worker():
     ctk.CTkButton(btns, text="Retake", command=lambda: reset_capture(captured, captured_time)).grid(row=0, column=0, padx=8)
     ctk.CTkButton(btns, text="Save Photo", command=lambda: save_photo_and_form(captured[0], cap, preview)).grid(row=0, column=1, padx=8)
 
-def reset_capture(captured, captured_time):
-    captured[0] = None
-    captured_time[0] = 0
-    info_label.configure(text="Look at camera again...")
+    def reset_capture(captured, captured_time):
+        captured[0] = None
+        captured_time[0] = 0
+        info_label.configure(text="Look at camera again...")
 
-def save_photo_and_form(photo_frame, cap, preview_win):
-    global pending_photo_path
-    cap.release()
-    preview_win.destroy()
+    def save_photo_and_form(photo_frame, cap, preview_win):
+        global pending_photo_path
+        cap.release()
+        preview_win.destroy()
 
-    if photo_frame is None:
-        info_label.configure(text="No photo captured! Try again.")
-        return
+        if photo_frame is None:
+            info_label.configure(text="No photo captured! Try again.")
+            return
 
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    pending_photo_path = f"pending_photos/photo_{timestamp}.jpg"
-    cv2.imwrite(pending_photo_path, photo_frame)
-    info_label.configure(text="Photo saved! Fill the form.")
-    open_registration_form()
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        pending_photo_path = f"pending_photos/photo_{timestamp}.jpg"
+        cv2.imwrite(pending_photo_path, photo_frame)
+        info_label.configure(text="Photo saved! Fill the form.")
+        open_registration_form()
 
 # -------------------------------------------------
 # Registration Form
@@ -333,19 +374,19 @@ def recognize_once():
                 if True in matches:
                     idx = matches.index(True)
                     name = known_face_names[idx]
-                    detected_name[0] = name
+                detected_name[0] = name
 
-                # Draw box + name
-                for (top, right, bottom, left) in locations:
-                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-                    cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            # Draw box + name
+            for (top, right, bottom, left) in locations:
+                cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-                # Auto-capture if face detected and timeout passed
-                if locations and current_time - captured_time[0] > 1:  # 1 sec debounce
-                    captured[0] = frame.copy()
-                    captured_time[0] = current_time
-                    info_label.configure(text=f"{name} detected! Save or Retake?")
-                    speak("Зураг авлаа")
+            # Auto-capture if face detected and timeout passed
+            if locations and current_time - captured_time[0] > 1:  # 1 sec debounce
+                captured[0] = frame.copy()
+                captured_time[0] = current_time
+                info_label.configure(text=f"{name} detected! Save or Retake?")
+                speak("Зураг авлаа")
 
         img = ctk.CTkImage(light_image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)),
                            dark_image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)),
@@ -361,37 +402,37 @@ def recognize_once():
     ctk.CTkButton(btns, text="Retake", command=lambda: reset_recognition(captured, captured_time)).grid(row=0, column=0, padx=8)
     ctk.CTkButton(btns, text="Save & Log", command=lambda: save_and_log(captured[0], detected_name[0], cap, preview)).grid(row=0, column=1, padx=8)
 
-def reset_recognition(captured, captured_time):
-    captured[0] = None
-    captured_time[0] = 0
-    info_label.configure(text="Look at camera again...")
+    def reset_recognition(captured, captured_time):
+        captured[0] = None
+        captured_time[0] = 0
+        info_label.configure(text="Look at camera again...")
 
-def save_and_log(photo_frame, name, cap, preview_win):
-    global active_workers
-    cap.release()
-    preview_win.destroy()
+    def save_and_log(photo_frame, name, cap, preview_win):
+        global active_workers
+        cap.release()
+        preview_win.destroy()
 
-    if photo_frame is None:
-        info_label.configure(text="No photo captured! Try again.")
-        return
+        if photo_frame is None:
+            info_label.configure(text="No photo captured! Try again.")
+            return
 
-    if name == "Unknown":
-        speak("Танихгүй хүн")
-        info_label.configure(text="Unknown face")
-        return
+        if name == "Unknown":
+            speak("Танихгүй хүн")
+            info_label.configure(text="Unknown face")
+            return
 
-    if name not in active_workers:
-        ts = log_time(name, "IN")
-        active_workers[name] = ts
-        speak(f"{name} ирлээ")
-        info_label.configure(text=f"{name} – IN at {ts.split()[1]}")
-    else:
-        in_ts = active_workers.pop(name)
-        out_ts = log_time(name, "OUT")
-        speak(f"{name} явлаа")
-        info_label.configure(text=f"{name} – OUT at {out_ts.split()[1]}")
+        if name not in active_workers:
+            ts = log_time(name, "IN")
+            active_workers[name] = ts
+            speak(f"{name} ирлээ")
+            info_label.configure(text=f"{name} – IN at {ts.split()[1]}")
+        else:
+            in_ts = active_workers.pop(name)
+            out_ts = log_time(name, "OUT")
+            speak(f"{name} явлаа")
+            info_label.configure(text=f"{name} – OUT at {out_ts.split()[1]}")
 
-    app.after(2000, lambda: info_label.configure(text="Select an action below"))
+        app.after(2000, lambda: info_label.configure(text="Select an action below"))
 
 # -------------------------------------------------
 # 4. Sens1 & Gerel Toggle Buttons
@@ -414,6 +455,43 @@ def toggle_gerel():
     speak(f"Гэрэл {state.lower()}")
 
 # -------------------------------------------------
+# Gemini Assistant Button Functionality
+# -------------------------------------------------
+def gemini_assistant():
+    info_label.configure(text="Сонсож байна... 6 секунд ярь!")
+    speak("Ярь")
+
+    r = sr.Recognizer()
+    r.energy_threshold = 300          # Микрофоны мэдрэмжийг бууруулах
+    r.dynamic_energy_threshold = True
+
+    with sr.Microphone() as source:
+        print("Микрофон идэвхжлээ, ярьж эхэл...")
+        r.adjust_for_ambient_noise(source, duration=0.8)  # Орчны дууг тохируулах
+        try:
+            audio = r.listen(source, timeout=8, phrase_time_limit=10)
+            info_label.configure(text="Google руу илгээж байна...")
+            text = r.recognize_google(audio, language="mn-MN")
+            print(f"Хэрэглэгч: {text}")
+            info_label.configure(text=f"Та: {text}")
+
+            response = ask_google_ai(text)
+            print(f"Gemini: {response}")
+            speak(response if response else "Хариу ирсэнгүй")
+            info_label.configure(text="Хариу дуугарлаа!")
+
+        except sr.WaitTimeoutError:
+            info_label.configure(text="Яриагүй эсвэл дууг сонссонгүй")
+            speak("Яриагүй байна")
+        except sr.UnknownValueError:
+            info_label.configure(text="Дууг ойлгосонгүй")
+            speak("Ойлгосонгүй")
+        except Exception as e:
+            info_label.configure(text="Алдаа гарлаа")
+            print("Gemini алдаа:", e)
+
+    app.after(4000, lambda: info_label.configure(text="Select an action below"))
+# -------------------------------------------------
 # Buttons Layout
 # -------------------------------------------------
 btn_frame = ctk.CTkFrame(app)
@@ -427,7 +505,9 @@ sens1_btn = ctk.CTkButton(btn_frame, text="Sens1: OFF", width=180, command=toggl
 sens1_btn.grid(row=1, column=1, padx=8, pady=4)
 
 gerel_btn = ctk.CTkButton(btn_frame, text="Gerel: OFF", width=180, command=toggle_gerel)
-gerel_btn.grid(row=2, column=0, padx=8, pady=4, columnspan=2)
+gerel_btn.grid(row=2, column=0, padx=8, pady=4)
+
+ctk.CTkButton(btn_frame, text="Gemini Assistant", width=180, command=gemini_assistant).grid(row=2, column=1, padx=8, pady=4)
 
 # -------------------------------------------------
 app.mainloop()
