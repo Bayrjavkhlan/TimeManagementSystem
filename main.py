@@ -71,7 +71,6 @@ ctk.CTkLabel.__init__ = _force_font
 # =============================================
 API_KEY = ""
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-
 def ask_google_ai(prompt):
     headers = {
         "Content-Type": "application/json",
@@ -82,8 +81,16 @@ def ask_google_ai(prompt):
     }
     try:
         response = requests.post(API_URL, headers=headers, json=data)
+        if response.status_code == 429:
+            # Free quota хэтэрсэн үед Монгол мессеж буцаана
+            quota_msg = "Gemini token дууссан байна"
+            print("[Gemini] Quota хэтэрсэн - хэрэглэгчид Монгол мессеж өгч байна")
+            return quota_msg
+        print("response:", response.text)
         response.raise_for_status()
         result = response.json()
+        
+        print("Full API response:", result)  # Debugging line
         candidates = result.get("candidates", [])
         if not candidates:
             return f"No candidates in response: {result}"
@@ -114,16 +121,17 @@ try:
 except:
     pass
 
-def speak(text: str, lang: str = "mn"):
+def speak(text: str):
     try:
-        t = gTTS(text=text, lang=lang, slow=False)
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-        t.save(tmp.name)
-        playsound(tmp.name)
-        os.unlink(tmp.name)
-    except:
-        pass
-    
+        if not text.strip():
+            return
+        safe_text = text.replace("'", "\\'")
+        # Female, slow, clear voice - best for Mongolian
+        os.system(f"espeak-ng -v ru+f3 -s 100 -p 80 -a 50 '{safe_text}'")
+    except Exception as e:
+        print("Дуу гаргах алдаа:", e)
+        
+        
 def beep(times=1, duration=0.08):
     def _beep():
         for _ in range(times):
@@ -765,21 +773,20 @@ def toggle_ai():
         ai_transcript = ""
         ai_btn.configure(text="AI ЗОГС", fg_color="#FF3333", hover_color="#CC0000")
         info_label.configure(text="Сонсож байна... ярьж эхэлнэ үү")
-        speak("Ярьж эхэлнэ үү")
+        speak("Сонсож байна")
 
         # Тусдаа thread дээр тасралтгүй сонсоно
         ai_thread = threading.Thread(target=continuous_listen, daemon=True)
         ai_thread.start()
 
-    else:                                                      # —— ЗОГСООХ + ИЛГЭЭХ ——
+    else: # —— ЗОГСООХ + ИЛГЭЭХ ——
         ai_listening = False
         ai_btn.configure(text="AI ажиллуулах", fg_color="#AA00FF", hover_color="#8800CC")
-        info_label.configure(text="Gemini-д илгээж байна...")
+        # Энд юу ч бичих шаардлагагүй – continuous_listen дотор бүгд зохицуулагдана
 
 def continuous_listen():
     """Товч дарах хүртэл тасралтгүй сонсоод текстийг нэгтгэнэ"""
     global ai_transcript
-
     r = sr.Recognizer()
     r.energy_threshold = 300
     r.dynamic_energy_threshold = True
@@ -788,43 +795,67 @@ def continuous_listen():
         r.adjust_for_ambient_noise(source, duration=1.0)
         print("[AI] Сонсоож эхэллээ...")
 
+        ai_transcript = ""
+
         while ai_listening:
             try:
-                # 1 секундын timeout, гэхдээ 15 секунд хүртэл ярьж болно
                 audio = r.listen(source, timeout=1.0, phrase_time_limit=15)
                 text = r.recognize_google(audio, language="mn-MN")
-
                 ai_transcript += text + " "
-                # Хамгийн сүүлийн хэсгийг л дэлгэцэнд харуулна (хэт урт болохгүй)
-                app.after(0, lambda t=text: info_label.configure(
-                    text=f"Сонссон: ...{t[-60:]}"))
+
+                # Бодит цагт хэрэглэгчийн ярьж байгаа текстийг info_label дээр харуулна
+                app.after(0, lambda t=ai_transcript.strip(): info_label.configure(
+                    text=f"Таны хэлсэн: {t[-80:]}" if len(t) > 80 else f"Таны хэлсэн: {t}"
+                ))
+
             except sr.WaitTimeoutError:
-                continue                                 # чимээгүй байвал хүлээнэ
+                continue
             except sr.UnknownValueError:
                 continue
             except Exception as e:
                 print("Сонсох алдаа:", e)
                 continue
 
-    # —— Товч дарагдаж зогссон үед энд ирнэ ——
+    # —— Яриа дууслаа (товч дарагдлаа) ——
     if ai_transcript.strip():
-        # First check if it's a light/fan command
-        if any(keyword in ai_transcript.lower() for keyword in ["гэрэл", "сэнс", "light", "fan"]):
-            process_voice_command(ai_transcript)
-            # Command was executed – do NOT send to Gemini
+        user_text = ai_transcript.strip()
+
+        # Эцсийн хэрэглэгчийн текстийг харуулах
+        app.after(0, lambda: info_label.configure(
+            text=f"Таны хэлсэн: {user_text[-90:]}" if len(user_text) > 90 else f"Таны хэлсэн: {user_text}"
+        ))
+
+        # Гэрэл/Сэнс команд шалгах
+        if any(keyword in user_text.lower() for keyword in ["гэрэл", "сэнс", "light", "fan"]):
+            process_voice_command(user_text)
             app.after(3000, lambda: info_label.configure(text="Үйлдэл сонгоно уу"))
-        else:
-            # Normal Gemini question – send to AI
-            app.after(0, lambda: info_label.configure(text="Gemini-д илгээж байна..."))
-            response = ask_google_ai(ai_transcript.strip())
-            app.after(0, lambda: info_label.configure(text="Хариу ирлээ!"))
-            speak(response)
-            app.after(3000, lambda: info_label.configure(text="Үйлдэл сонгоно уу"))
+            return
+
+        # Gemini рүү илгээх
+        app.after(0, lambda: info_label.configure(text="Gemini бодож байна..."))
+
+        response = ask_google_ai(user_text)
+
+        # 2 секундын дараа Gemini хариуг харуулаад уншина
+        def show_response():
+            if response and len(response) > 0 and "хэтэрлээ" not in response and "алдаа" not in response.lower():
+                    display_text = response[:100] + "..." if len(response) > 100 else response
+                    info_label.configure(text=f"Хариу: {display_text}")
+                    speak(response)
+            else:
+                display_text = response[:100] + "..." if response and len(response) > 100 else (response or "Хариу ирсэнгүй")
+                info_label.configure(text=f"Анхааруулга: {display_text}")
+                speak(response or "Уучлаарай, алдаа гарлаа")
+
+            # 4 секундын дараа буцаад анхны байдал руу
+            app.after(4000, lambda: info_label.configure(text="Үйлдэл сонгоно уу"))
+
+        app.after(2000, show_response)  # Яг 2 секундын дараа
+
     else:
         app.after(0, lambda: info_label.configure(text="Юу ч сонссонгүй"))
         speak("Юу ч сонссонгүй")
-
-    app.after(3000, lambda: info_label.configure(text="Үйлдэл сонгоно уу"))
+        app.after(3000, lambda: info_label.configure(text="Үйлдэл сонгоно уу"))
 # -------------------------------------------------
 # Buttons Layout
 # -------------------------------------------------
