@@ -1,8 +1,11 @@
+import os
+from openai import OpenAI
+os.environ["PYTHONIOENCODING"] = "utf-8"
+
 import customtkinter as ctk
 import cv2
 import face_recognition
 import numpy as np
-import os
 import time
 import datetime
 from PIL import Image
@@ -18,6 +21,8 @@ import RPi.GPIO as GPIO
 import board
 import adafruit_dht
 from playsound import playsound
+from PIL import Image as PILImage
+
 
 # =============================================
 # HARDWARE SETUP (DO NOT CHANGE)
@@ -69,46 +74,40 @@ ctk.CTkLabel.__init__ = _force_font
 # =============================================
 # Your original code starts here
 # =============================================
-API_KEY = ""
-API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-def ask_google_ai(prompt):
-    headers = {
-        "Content-Type": "application/json",
-        "X-goog-api-key": API_KEY
-    }
-    data = {
-        "contents": [{"parts": [{"text": prompt}]}]
-    }
-    try:
-        response = requests.post(API_URL, headers=headers, json=data)
-        if response.status_code == 429:
-            # Free quota хэтэрсэн үед Монгол мессеж буцаана
-            quota_msg = "Gemini token дууссан байна"
-            print("[Gemini] Quota хэтэрсэн - хэрэглэгчид Монгол мессеж өгч байна")
-            return quota_msg
-        print("response:", response.text)
-        response.raise_for_status()
-        result = response.json()
-        
-        print("Full API response:", result)  # Debugging line
-        candidates = result.get("candidates", [])
-        if not candidates:
-            return f"No candidates in response: {result}"
-        # New API: content is a dict with 'parts' list
-        content_dict = candidates[0].get("content", {})
-        parts = content_dict.get("parts", [])
-        if not parts:
-            return f"No parts in content: {content_dict}"
-        # Join all text parts
-        answer = "".join([p.get("text", "") for p in parts])
-        return answer
-    except requests.exceptions.RequestException as e:
-        return f"HTTP error: {e}"
-    except ValueError:
-        return f"Failed to parse JSON: {response.text}"
-    except Exception as e:
-        return f"Unexpected error: {e}"
+# API_KEY = ""
+GROQ_API_KEY = ""  # <-- Энд өөрийн key-г бич
+# API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
+def ask_google_ai(prompt):
+    if not prompt.strip():
+        return "Асуулт хоосон байна"
+    
+    client = OpenAI(
+        api_key=GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1"
+    )
+    
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": "Та Монгол хэлээр маш товч, ойлгомжтой хариулна уу."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1000,
+            timeout=30
+        )
+        
+        answer = response.choices[0].message.content.strip()
+        # Терминал дээр Монгол текст зөв хэвлэхийн тулд
+        print(f"Groq хариу: {answer}")
+        return answer if answer else "Хариу хоосон ирлээ"
+        
+    except Exception as e:
+        # Алдааг аюулгүй хэвлэх
+        print("Groq алдаа:", repr(e))  # repr() ашиглавал Монгол үсэгтэй ч гэсэн алдаа гарахгүй
+        return "Уучлаарай, хариу авахад алдаа гарлаа"
 os.makedirs("known_faces", exist_ok=True)
 os.makedirs("worker_data", exist_ok=True)
 os.makedirs("pending_photos", exist_ok=True)
@@ -121,16 +120,20 @@ try:
 except:
     pass
 
+import threading
+
 def speak(text: str):
-    try:
-        if not text.strip():
-            return
-        safe_text = text.replace("'", "\\'")
-        # Female, slow, clear voice - best for Mongolian
-        os.system(f"espeak-ng -v ru+f3 -s 100 -p 80 -a 50 '{safe_text}'")
-    except Exception as e:
-        print("Дуу гаргах алдаа:", e)
-        
+    def _speak():
+        try:
+            if not text.strip():
+                return
+            safe_text = text.replace("'", "\\'")
+            os.system(f"espeak-ng -v ru+f3 -s 100 -p 80 -a 50 '{safe_text}'")
+        except Exception as e:
+            print("Дуу гаргах алдаа:", e)
+    
+    # Background thread дээр дууг тоглуулна → GUI блоклогдохгүй
+    threading.Thread(target=_speak, daemon=True).start()
         
 def beep(times=1, duration=0.08):
     def _beep():
@@ -222,10 +225,20 @@ app.focus_force()
 
 app.bind("<Escape>", lambda e: app.attributes("-fullscreen", False))
 
+bg_image = ctk.CTkImage(
+    light_image=PILImage.open("background.jpg"),
+    dark_image=PILImage.open("background.jpg"),
+    size=(app.winfo_screenwidth(), app.winfo_screenheight())
+)
+
+bg_label = ctk.CTkLabel(app, image=bg_image, text="")
+bg_label.place(x=0, y=0, relwidth=1, relheight=1)
+bg_label.lower()
+
 # Clock
 date_label = ctk.CTkLabel(app, text="", font=("Noto Sans CJK JP", 24), text_color="#00DDFF")
 date_label.pack(pady=(0))
-time_label = ctk.CTkLabel(app, text="", font=("Noto Sans CJK JP", 32, "bold"), text_color="white")
+time_label = ctk.CTkLabel(app, text="", font=("Noto Sans CJK JP", 32, "bold"), text_color="#2288ff")
 time_label.pack(pady=(0))
 
 
@@ -468,7 +481,7 @@ def show_custom_keyboard(entry_widget):
     kb_y = screen_h - kb_height        # fix to bottom
 
     kb = ctk.CTkToplevel(app)
-    kb.title("Мундаг хосоогийн кэеборд")
+    kb.title("Khosbayar's keyboard")
     kb.geometry(f"{screen_w}x{kb_height}+0+{kb_y}")
     kb.configure(fg_color="#1e1e2e")
     kb.resizable(False, False)
@@ -832,24 +845,25 @@ def continuous_listen():
             return
 
         # Gemini рүү илгээх
-        app.after(0, lambda: info_label.configure(text="Gemini бодож байна..."))
+        app.after(0, lambda: info_label.configure(text="GROK бодож байна..."))
 
         response = ask_google_ai(user_text)
 
         # 2 секундын дараа Gemini хариуг харуулаад уншина
         def show_response():
             if response and len(response) > 0 and "хэтэрлээ" not in response and "алдаа" not in response.lower():
-                    display_text = response[:100] + "..." if len(response) > 100 else response
-                    info_label.configure(text=f"Хариу: {display_text}")
-                    speak(response)
+                display_text = response[:100] + "..." if len(response) > 100 else response
+                info_label.configure(text=f"Хариу: {display_text}")
+                speak(response)  # Одоо background-д ажиллана → label шууд солигдоно
             else:
                 display_text = response[:100] + "..." if response and len(response) > 100 else (response or "Хариу ирсэнгүй")
                 info_label.configure(text=f"Анхааруулга: {display_text}")
                 speak(response or "Уучлаарай, алдаа гарлаа")
 
-            # 4 секундын дараа буцаад анхны байдал руу
-            app.after(4000, lambda: info_label.configure(text="Үйлдэл сонгоно уу"))
-
+            # Дуу дуусахыг хүлээхгүй – 8 секунд хүлээгээд буцаана (дууны урттай тааруул)
+            app.after(8000, lambda: info_label.configure(text="Үйлдэл сонгоно уу"))
+            
+            
         app.after(2000, show_response)  # Яг 2 секундын дараа
 
     else:
