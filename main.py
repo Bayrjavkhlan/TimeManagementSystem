@@ -64,13 +64,64 @@ temp_label = None
 print("Апп эхлэхээс өмнө микрофон болон чанга яригчийг шалгаж, сэрээж байна...")
 
 # 1. Спикер тест (espeak-ng ашиглаж дуу гаргана – Bluetooth спикер ч ажиллана)
-def test_speaker():
+def set_bluetooth_default_sink():
     try:
-        os.system('espeak-ng "Систем эхэллээ" -v mn -s 120 -p 50 -a 50 2>/dev/null')
-        print("Чанга яригч ажиллаж байна ✓")
+        # pactl-ээр Bluetooth sink олох
+        result = os.popen("pactl list sinks short | grep bluez_output").read().strip()
+        if result:
+            lines = result.splitlines()
+            # Эхний Bluetooth sink-ийг авна (ихэвчлэн нэг л байдаг)
+            sink_name = lines[0].split()[1]
+            os.system(f"pactl set-default-sink {sink_name}")
+            print(f"Аудио default болголоо: {sink_name} ✓")
+        else:
+            print("Bluetooth спикер sink олдсонгүй ✗")
+    except Exception as e:
+        print(f"Default sink тохируулах алдаа: {e}")
+
+# Апп эхлэхэд дуудна
+set_bluetooth_default_sink()
+
+def test_speaker():
+    print("Bluetooth спикер албадан холбож байна (disconnect + reconnect)...")
+    
+    try:
+        # 1. Одоо холбогдсон аудио төхөөрөмжийн MAC address олох
+        result = os.popen("bluetoothctl devices Connected").read().strip()
+        if not result:
+            print("Холбогдсон Bluetooth төхөөрөмж олдсонгүй ✗")
+            return False
+        
+        connected_macs = [line.split()[1] for line in result.splitlines() if line.strip()]
+        
+        speaker_mac = None
+        for mac in connected_macs:
+            info = os.popen(f"bluetoothctl info {mac}").read()
+            if "Connected: yes" in info and ("Icon: audio" in info.lower() or "UUID: Audio" in info):
+                speaker_mac = mac
+                break
+        
+        if not speaker_mac:
+            print("Аудио төхөөрөмж (спикер) олдсонгүй ✗")
+            return False
+        
+        print(f"Олдсон спикер: {speaker_mac}")
+        
+        # 2. Disconnect хийнэ
+        os.system(f"bluetoothctl disconnect {speaker_mac} > /dev/null 2>&1")
+        time.sleep(2)  # Хүлээж өгнө
+        
+        # 3. Reconnect хийнэ
+        os.system(f"bluetoothctl connect {speaker_mac} > /dev/null 2>&1")
+        time.sleep(3)  # Холболтыг хүлээнэ
+        
+        # 4. Дуу тест хийнэ
+        os.system('espeak-ng "Систем бэлэн боллоо" -v mn -s 120 -p 50 -a 50 2>/dev/null')
+        print("Спикер амжилттай холбогдож, дуу гарлаа ✓")
         return True
-    except:
-        print("Чанга яригч алдаа гарлаа ✗")
+        
+    except Exception as e:
+        print(f"Спикер холболт алдаа: {e} ✗")
         return False
 
 # 2. Микрофон тест (speech_recognition ашиглаж богино хугацаанд сонсоно)
