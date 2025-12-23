@@ -56,6 +56,65 @@ light_auto_on = False
 # Temperature display
 temp_label = None
 
+
+
+# =============================================
+# PRE-START HARDWARE TEST – Microphone & Speaker Force Initialize
+# =============================================
+print("Апп эхлэхээс өмнө микрофон болон чанга яригчийг шалгаж, сэрээж байна...")
+
+# 1. Спикер тест (espeak-ng ашиглаж дуу гаргана – Bluetooth спикер ч ажиллана)
+def test_speaker():
+    try:
+        os.system('espeak-ng "Систем эхэллээ" -v mn -s 120 -p 50 -a 50 2>/dev/null')
+        print("Чанга яригч ажиллаж байна ✓")
+        return True
+    except:
+        print("Чанга яригч алдаа гарлаа ✗")
+        return False
+
+# 2. Микрофон тест (speech_recognition ашиглаж богино хугацаанд сонсоно)
+def test_microphone():
+    r = sr.Recognizer()
+    try:
+        with sr.Microphone() as source:
+            print("Микрофон шалгаж байна... 2 секунд хүлээнэ үү")
+            r.adjust_for_ambient_noise(source, duration=1)
+            audio = r.listen(source, timeout=2, phrase_time_limit=2)
+        print("Микрофон ажиллаж байна ✓")
+        return True
+    except sr.WaitTimeoutError:
+        print("Микрофон дуу сонссонгүй, гэхдээ төхөөрөмж нээгдсэн – ажиллаж магадгүй")
+        return True
+    except Exception as e:
+        print(f"Микрофон алдаа: {e} ✗")
+        return False
+
+# 3. Камер тест (нэг frame авна)
+def test_camera():
+    try:
+        cap = cv2.VideoCapture(0)
+        ret, frame = cap.read()
+        cap.release()
+        if ret:
+            print("Камер ажиллаж байна ✓")
+            return True
+        else:
+            print("Камер зураг авч чадсангүй ✗")
+            return False
+    except:
+        print("Камер нээгдсэнгүй ✗")
+        return False
+
+# Тестүүдийг ажиллуулна
+test_speaker()
+test_microphone()
+test_camera()
+
+print("Төхөөрөмжийн шалгалт дууслаа. GUI эхэлж байна...\n")
+time.sleep(1)  # Хэрэглэгч мессежийг харах боломж өгнө
+
+
 # =============================================
 # Mongolian Font Fix (100% working)
 # =============================================
@@ -129,10 +188,15 @@ def speak(text: str):
                 return
             safe_text = text.replace("'", "\\'")
             os.system(f"espeak-ng -v ru+f3 -s 100 -p 80 -a 50 '{safe_text}'")
+            # Дуу дууссаны дараа буцааж саарал/улаан болгоно
+            app.after(5000, lambda: speaker_label.configure(text_color="gray" if check_speaker() else "red"))
         except Exception as e:
             print("Дуу гаргах алдаа:", e)
-    
-    # Background thread дээр дууг тоглуулна → GUI блоклогдохгүй
+            app.after(100, lambda: speaker_label.configure(text_color="red"))
+
+    # Дуу эхлэхэд ногоон болгоно (зөвхөн холбогдсон бол)
+    if check_speaker():
+        speaker_label.configure(text_color="green")
     threading.Thread(target=_speak, daemon=True).start()
         
 def beep(times=1, duration=0.08):
@@ -241,6 +305,119 @@ date_label.pack(pady=(0))
 time_label = ctk.CTkLabel(app, text="", font=("Noto Sans CJK JP", 32, "bold"), text_color="#2288ff")
 time_label.pack(pady=(0))
 
+# =============================================
+# STATUS INDICATORS (Top Right Corner) - Full Connection + Active Check
+# =============================================
+status_frame = ctk.CTkFrame(app, fg_color="transparent")
+status_frame.place(relx=1.0, rely=0.0, anchor="ne", x=-20, y=20)
+
+mic_label = ctk.CTkLabel(status_frame, text="🎙️ ●", font=("Arial", 28), text_color="red")
+mic_label.grid(row=0, column=0, padx=15)
+
+speaker_label = ctk.CTkLabel(status_frame, text="🔊 ●", font=("Arial", 28), text_color="red")
+speaker_label.grid(row=0, column=1, padx=15)
+
+camera_label = ctk.CTkLabel(status_frame, text="📷 ●", font=("Arial", 28), text_color="red")
+camera_label.grid(row=0, column=2, padx=15)
+
+# Hover tooltip
+mic_label.bind("<Enter>", lambda e: info_label.configure(text="Микрофон"))
+mic_label.bind("<Leave>", lambda e: info_label.configure(text="Үйлдэл сонгоно уу"))
+speaker_label.bind("<Enter>", lambda e: info_label.configure(text="Чанга яригч"))
+speaker_label.bind("<Leave>", lambda e: info_label.configure(text="Үйлдэл сонгоно уу"))
+camera_label.bind("<Enter>", lambda e: info_label.configure(text="Камер"))
+camera_label.bind("<Leave>", lambda e: info_label.configure(text="Үйлдэл сонгоно уу"))
+
+# Холболт шалгах функцууд (засвартай – илүү найдвартай)
+def check_microphone():
+    try:
+        cap = cv2.VideoCapture(0)
+        ret, frame = cap.read()
+        cap.release()
+        return ret
+    except:
+        return False
+
+def check_speaker():
+    try:
+        # bluetoothctl devices Connected командыг ашиглаж, холбогдсон төхөөрөмжүүдийг авна
+        result = os.popen("bluetoothctl devices Connected").read().strip()
+        
+        if not result:
+            return False  # Ямар ч төхөөрөмж холбогдоогүй
+        
+        # Холбогдсон төхөөрөмжүүдийн MAC address-уудыг авна
+        connected_macs = [line.split()[1] for line in result.splitlines() if line.strip()]
+        
+        # Тус бүрийн info-г шалгаж, аудио төхөөрөмж эсэхийг харна
+        for mac in connected_macs:
+            info = os.popen(f"bluetoothctl info {mac}").read()
+            if "Connected: yes" in info and ("Icon: audio" in info.lower() or "UUID: Audio" in info):
+                return True
+        
+        return False
+    except Exception as e:
+        print("Bluetooth спикер шалгалт алдаа:", e)
+        return False
+
+def check_camera():
+    try:
+        cap = cv2.VideoCapture(0)
+        ret, frame = cap.read()
+        cap.release()
+        return ret
+    except:
+        return False
+
+# Глобал төлөвүүд
+mic_connected = False
+speaker_connected = False
+camera_connected = False
+camera_active = False     # Одоо ашиглаж байгаа эсэх
+ai_listening = False         # глобал төлөв
+ai_thread = None             # thread хадгалах
+ai_transcript = ""           # бүх яригдсан текст
+
+# Индикатор шинэчлэх функц – зөв дуудагдана
+def update_status_indicators():
+    global mic_connected, speaker_connected, camera_connected, camera_active
+
+    if not camera_active:
+        current_connected = check_camera()
+        if current_connected != camera_connected:
+            camera_connected = current_connected
+            color = "red" if not camera_connected else "gray"
+            camera_label.configure(text_color=color)
+
+    # Камер идэвхтэй бол яг ногоон хэвээр байлгана
+    if camera_active and camera_connected:
+        camera_label.configure(text_color="green")
+
+    # Микрофон
+    current_mic = check_microphone()
+    if current_mic:
+        mic_color = "green" if ai_listening else "gray"
+    else:
+        mic_color = "red"
+    mic_label.configure(text_color=mic_color)
+    mic_connected = current_mic
+
+    # Чанга яригч
+    current_speaker = check_speaker()
+    if current_speaker:
+        # speak() дотор ногоон болгоно
+        speaker_color = "gray"  # default саарал (speak() дотор ногоон болгоно)
+    else:
+        speaker_color = "red"
+    speaker_label.configure(text_color=speaker_color)
+    speaker_connected = current_speaker
+
+
+    # 3 секунд тутам дахин шалгана
+    app.after(3000, update_status_indicators)
+
+# Апп эхлэхэд шалгалт эхэлнэ
+update_status_indicators()
 
 
 def update_clock():
@@ -303,6 +480,9 @@ def update_temp_and_control():
             light_auto_on = False
 
     app.after(5000, update_temp_and_control)
+    
+    
+
 
 
 # =============================================
@@ -358,6 +538,10 @@ pending_photo_path = None
 
 def add_worker():
     global pending_photo_path
+    global camera_active
+    camera_active = True
+    if camera_connected:
+        camera_label.configure(text_color="green")
     info_label.configure(text="Камерлуу хараарай...")
     app.update()
 
@@ -373,6 +557,9 @@ def add_worker():
     preview.focus_force()
     preview.config(cursor="none")
     preview.bind("<Escape>", lambda e: preview.destroy())
+    camera_active = False
+    color = "gray" if camera_connected else "red"
+    camera_label.configure(text_color=color)
     cam_label = ctk.CTkLabel(preview, text="")
     cam_label.pack()
     cam_label.pack(expand=True, fill="both")     # ← make video fill the whole screen
@@ -430,6 +617,7 @@ def add_worker():
 
     def save_photo_and_form(photo_frame, cap, preview_win):
         global pending_photo_path
+        camera_label.configure(text_color="gray")
         cap.release()
         preview_win.destroy()
 
@@ -632,6 +820,10 @@ active_workers = {}
 
 def recognize_once():
     global active_workers
+    global camera_active
+    camera_active = True
+    if camera_connected:
+        camera_label.configure(text_color="green")
     info_label.configure(text="Камерлуу хараарай...")
     app.update()
 
@@ -742,6 +934,10 @@ def recognize_once():
             beep(2)                                # ← 2 beeps = goodbye
             speak(f"{name} явлаа")
             info_label.configure(text=f"{name} – OUT at {out_ts.split()[1]}")
+        global camera_active
+        camera_active = False
+        color = "gray" if camera_connected else "red"
+        camera_label.configure(text_color=color)
         app.after(2000, lambda: info_label.configure(text="Үйлдэл сонгоно уу"))
 
 # -------------------------------------------------
@@ -774,9 +970,7 @@ gerel_state = False
 # Gemini Assistant Button Functionality
 # -------------------------------------------------
 # ==================== AI ТОВЧ – ТАСРАЛТГҮЙ СОНСООД ДАРАА НЬ ИЛГЭЭХ ====================
-ai_listening = False         # глобал төлөв
-ai_thread = None             # thread хадгалах
-ai_transcript = ""           # бүх яригдсан текст
+
 
 def toggle_ai():
     global ai_listening, ai_thread, ai_transcript
@@ -870,6 +1064,8 @@ def continuous_listen():
         app.after(0, lambda: info_label.configure(text="Юу ч сонссонгүй"))
         speak("Юу ч сонссонгүй")
         app.after(3000, lambda: info_label.configure(text="Үйлдэл сонгоно уу"))
+        
+        
 # -------------------------------------------------
 # Buttons Layout
 # -------------------------------------------------
